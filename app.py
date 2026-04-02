@@ -34,16 +34,18 @@ st.title("🎒 F306 HAZZARD 現貨掃描")
 st.caption("直接連線 Freitag 數據庫，獲取最準確庫存")
 
 def fetch_f306_stock():
-    # Freitag 官網使用的 GraphQL API 接口
-    api_url = "https://www.freitag.ch/en/api/graphql"
+    # 嘗試使用通用的 API 接口，去掉 /en/ 路徑
+    api_url = "https://www.freitag.ch/api/graphql"
     
-    # 查詢指令 (針對 F306 的產品 ID: 2211)
+    # 這是 F306 的產品 ID 2211
+    # 我們加入更多參數確保 API 認為我們是合法用戶
     query = """
-    query {
-      product(id: "2211") {
-        name
+    query GetProductVariants($id: String!) {
+      product(id: $id) {
         variants {
-          price { formatted }
+          price {
+            formatted
+          }
           url
           images {
             url
@@ -52,6 +54,38 @@ def fetch_f306_stock():
       }
     }
     """
+    
+    variables = {"id": "2211"}
+    
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://www.freitag.ch/en/f306",
+        "Origin": "https://www.freitag.ch"
+    }
+
+    try:
+        # 使用 json 參數傳遞 query 和 variables
+        response = requests.post(
+            api_url, 
+            json={'query': query, 'variables': variables}, 
+            headers=headers, 
+            timeout=15
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if 'data' in result and result['data']['product']:
+                return result['data']['product']['variants']
+            else:
+                st.warning("API 回傳成功但找不到產品數據，可能 ID 有變。")
+                return []
+        else:
+            st.error(f"連線失敗，代碼：{response.status_code}。可能是 API 網址已更改。")
+            return []
+    except Exception as e:
+        st.error(f"發生異常: {e}")
+        return []
     
     headers = {
         "Content-Type": "application/json",
