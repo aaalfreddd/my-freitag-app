@@ -1,93 +1,61 @@
 import streamlit as st
 import requests
-from bs4 import BeautifulSoup
-import re
 
 st.set_page_config(page_title="F306 Hazzard 助手", layout="centered")
 
+# 手機優化 CSS
 st.markdown("""
     <style>
     .product-box { border: 1px solid #eee; border-radius: 12px; padding: 15px; margin-bottom: 20px; text-align: center; background: white; color: black; }
     .price-text { color: #d32f2f; font-weight: bold; font-size: 1.3rem; margin: 10px 0; }
-    img { border-radius: 8px; width: 100%; height: auto; background: #f0f0f0; }
+    img { border-radius: 8px; width: 100%; height: auto; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🎒 F306 HAZZARD 實時掃描")
+st.title("🎒 F306 HAZZARD 直接掃描")
+st.caption("直接連線至 Freitag 雲端數據庫 (Algolia)")
 
-def fetch_data():
-    # 使用 F306 專屬網址
-    url = "https://www.freitag.ch/en/f306"
+def fetch_from_algolia():
+    # Freitag 的 Algolia 接口資訊 (這是公開的 API Key)
+    api_url = "https://3v8vj997v8-dsn.algolia.net/1/indexes/*/queries?x-algolia-agent=Algolia%20for%20JavaScript%20(4.14.2)%3B%20Browser&x-algolia-api-key=52d194895089311656b69f635581177d&x-algolia-application-id=3V8VJ997V8"
     
-    # 模擬非常真實的 iPhone 瀏覽器 Header
-    headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.google.com/",
-        "DNT": "1"
+    # 搜尋 F306 的參數
+    payload = {
+        "requests": [
+            {
+                "indexName": "freitag_prod_en_products",
+                "params": "query=F306&hitsPerPage=50&filters=model_id:2211"
+            }
+        ]
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=20)
-        if response.status_code != 200:
-            st.error(f"網站拒絕連線 (錯誤碼: {response.status_code})")
+        response = requests.post(api_url, json=payload, timeout=15)
+        if response.status_code == 200:
+            hits = response.json()['results'][0]['hits']
+            products = []
+            for hit in hits:
+                # 只抓取真正有圖片和型號匹配的
+                if 'image_url' in hit:
+                    products.append({
+                        "img": hit['image_url'],
+                        "price": f"CHF {hit.get('price', 'N/A')}",
+                        "link": "https://www.freitag.ch/en/" + hit.get('url_path', '')
+                    })
+            return products
+        else:
+            st.error(f"連線資料庫失敗 (代碼: {response.status_code})")
             return []
-            
-        soup = BeautifulSoup(response.text, 'html.parser')
-        products = []
-        
-        # 1. 嘗試尋找產品列表容器
-        items = soup.find_all(['li', 'div'], class_=re.compile("product-item|product_item"))
-        
-        if not items:
-            # 備用方案：如果 class 沒對上，直接抓所有包含連結和圖片的方塊
-            items = soup.select('li[class*="item"]')
-
-        for item in items:
-            try:
-                # 抓取圖片：嘗試所有可能的屬性 (src, data-src, data-original)
-                img_tag = item.find('img')
-                if not img_tag: continue
-                
-                img_url = (img_tag.get('data-src') or 
-                           img_tag.get('data-original') or 
-                           img_tag.get('src'))
-                
-                # 如果圖片是相對路徑，補全它
-                if img_url and img_url.startswith('/'):
-                    img_url = "https://www.freitag.ch" + img_url
-
-                # 抓取連結
-                link_tag = item.find('a', href=True)
-                link = link_tag['href']
-                if not link.startswith('http'):
-                    link = "https://www.freitag.ch" + link
-                
-                # 抓取價格
-                price_tag = item.find(class_=re.compile("price|amount"))
-                price = price_tag.get_text().strip() if price_tag else "Check on site"
-                
-                # 排除一些沒意義的佔位圖
-                if img_url and "base64" not in img_url:
-                    products.append({"img": img_url, "price": price, "link": link})
-            except:
-                continue
-                
-        return products
     except Exception as e:
-        st.error(f"連線異常: {e}")
+        st.error(f"發生錯誤: {e}")
         return []
 
-if st.button('🚀 重新掃描 F306 庫存'):
-    with st.spinner('正在從官網搬運數據...'):
-        data = fetch_data()
+if st.button('🚀 執行深度掃描'):
+    with st.spinner('正在同步瑞士資料庫中...'):
+        data = fetch_from_algolia()
         if data:
-            # 由於可能抓到重複項，我們做個簡單的去重
-            unique_data = {p['img']: p for p in data}.values()
-            st.success(f"找到了 {len(unique_data)} 款現貨！")
-            
-            for p in unique_data:
+            st.success(f"成功連線！發現 {len(data)} 款 F306 現貨")
+            for p in data:
                 with st.container():
                     st.markdown(f"""
                     <div class="product-box">
@@ -95,7 +63,7 @@ if st.button('🚀 重新掃描 F306 庫存'):
                         <div class="price-text">{p['price']}</div>
                     </div>
                     """, unsafe_allow_html=True)
-                    st.link_button("👉 直接查看", p['link'])
+                    st.link_button("👉 前往購買", p['link'])
                     st.markdown("<br>", unsafe_allow_html=True)
         else:
-            st.warning("暫時沒抓到資料。可能是官網目前沒有 F306 現貨，或是防爬蟲等級太高。")
+            st.warning("資料庫目前回傳 0 筆結果。可能真的賣完了，或是 API Key 有變動。")
