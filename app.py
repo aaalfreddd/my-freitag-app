@@ -3,7 +3,6 @@ import requests
 
 st.set_page_config(page_title="F306 Hazzard 助手", layout="centered")
 
-# 手機優化 CSS
 st.markdown("""
     <style>
     .product-box { border: 1px solid #eee; border-radius: 12px; padding: 15px; margin-bottom: 20px; text-align: center; background: white; color: black; }
@@ -12,58 +11,49 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🎒 F306 HAZZARD 直接掃描")
-st.caption("直接連線至 Freitag 雲端數據庫 (Algolia)")
+st.title("🎒 F306 HAZZARD 掃描器")
+st.caption("直接抓取 Freitag 官方產品目錄數據")
 
-def fetch_from_algolia():
-    # Freitag 的 Algolia 接口資訊 (這是公開的 API Key)
-    api_url = "https://3v8vj997v8-dsn.algolia.net/1/indexes/*/queries?x-algolia-agent=Algolia%20for%20JavaScript%20(4.14.2)%3B%20Browser&x-algolia-api-key=52d194895089311656b69f635581177d&x-algolia-application-id=3V8VJ997V8"
+def fetch_data():
+    # 這是 Freitag 官方最直接的產品列表數據接口 (F306 型號代碼 2211)
+    # 我們改用更通用的請求方式
+    url = "https://www.freitag.ch/en/f306/load-more"
     
-    # 搜尋 F306 的參數
-    payload = {
-        "requests": [
-            {
-                "indexName": "freitag_prod_en_products",
-                "params": "query=F306&hitsPerPage=50&filters=model_id:2211"
-            }
-        ]
+    headers = {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+        "X-Requested-With": "XMLHttpRequest",
+        "Accept": "application/json, text/javascript, */*; q=0.01"
     }
-    
+
     try:
-        response = requests.post(api_url, json=payload, timeout=15)
+        # 直接請求 load-more 介面，這通常會回傳當前所有庫存的 HTML 或是 JSON
+        response = requests.get(url, headers=headers, timeout=15)
+        
         if response.status_code == 200:
-            hits = response.json()['results'][0]['hits']
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(response.text, 'html.parser')
             products = []
-            for hit in hits:
-                # 只抓取真正有圖片和型號匹配的
-                if 'image_url' in hit:
-                    products.append({
-                        "img": hit['image_url'],
-                        "price": f"CHF {hit.get('price', 'N/A')}",
-                        "link": "https://www.freitag.ch/en/" + hit.get('url_path', '')
-                    })
+            
+            # 定位所有產品項目
+            items = soup.select('.product-item')
+            for item in items:
+                try:
+                    img_tag = item.select_one('img')
+                    # 抓取圖片，優先找延遲載入的真實位址
+                    img = img_tag.get('data-src') or img_tag.get('src')
+                    if img and img.startswith('/'):
+                        img = "https://www.freitag.ch" + img
+                        
+                    price = item.select_one('.price').get_text().strip()
+                    link = "https://www.freitag.ch" + item.select_one('a')['href']
+                    
+                    if "placeholder" not in img:
+                        products.append({"img": img, "price": price, "link": link})
+                except:
+                    continue
             return products
         else:
-            st.error(f"連線資料庫失敗 (代碼: {response.status_code})")
+            st.error(f"官網回應異常 (代碼: {response.status_code})")
             return []
     except Exception as e:
-        st.error(f"發生錯誤: {e}")
-        return []
-
-if st.button('🚀 執行深度掃描'):
-    with st.spinner('正在同步瑞士資料庫中...'):
-        data = fetch_from_algolia()
-        if data:
-            st.success(f"成功連線！發現 {len(data)} 款 F306 現貨")
-            for p in data:
-                with st.container():
-                    st.markdown(f"""
-                    <div class="product-box">
-                        <img src="{p['img']}">
-                        <div class="price-text">{p['price']}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    st.link_button("👉 前往購買", p['link'])
-                    st.markdown("<br>", unsafe_allow_html=True)
-        else:
-            st.warning("資料庫目前回傳 0 筆結果。可能真的賣完了，或是 API Key 有變動。")
+        st.error(f"連線失敗: {e}")
