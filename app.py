@@ -1,80 +1,98 @@
 import streamlit as st
-import cloudscraper
-from bs4 import BeautifulSoup
+import requests
+import json
 
-st.set_page_config(page_title="F306 Hazzard 助手", layout="centered")
+# 頁面基本設置
+st.set_page_config(page_title="F306 Hazzard 監視器", page_icon="🎒", layout="centered")
 
-# 美化 UI
 st.markdown("""
     <style>
-    .product-box { border: 1px solid #eee; border-radius: 12px; padding: 15px; margin-bottom: 20px; text-align: center; background: white; color: black; }
-    .price-text { color: #d32f2f; font-weight: bold; font-size: 1.3rem; margin: 10px 0; }
-    img { border-radius: 8px; width: 100%; height: auto; }
+    .product-card {
+        border: 1px solid #eee;
+        border-radius: 15px;
+        padding: 15px;
+        margin-bottom: 25px;
+        background-color: white;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        text-align: center;
+    }
+    .price-tag {
+        color: #e63946;
+        font-size: 1.4rem;
+        font-weight: bold;
+        margin: 10px 0;
+    }
+    img {
+        border-radius: 10px;
+        width: 100%;
+        height: auto;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🎒 F306 HAZZARD 實時清單")
+st.title("🎒 F306 HAZZARD 現貨掃描")
+st.caption("直接連線 Freitag 數據庫，獲取最準確庫存")
 
-def fetch_data():
-    url = "https://www.freitag.ch/en/f306"
-    # 使用 cloudscraper 繞過 Cloudflare 等防爬工具
-    scraper = cloudscraper.create_scraper(
-        browser={
-            'browser': 'chrome',
-            'platform': 'windows',
-            'mobile': False
-        }
-    )
+def fetch_f306_stock():
+    # Freitag 官網使用的 GraphQL API 接口
+    api_url = "https://www.freitag.ch/en/api/graphql"
     
+    # 查詢指令 (針對 F306 的產品 ID: 2211)
+    query = """
+    query {
+      product(id: "2211") {
+        name
+        variants {
+          price { formatted }
+          url
+          images {
+            url
+          }
+        }
+      }
+    }
+    """
+    
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1"
+    }
+
     try:
-        response = scraper.get(url, timeout=20)
-        if response.status_code != 200:
-            st.error(f"網站回傳錯誤碼: {response.status_code}")
+        response = requests.post(api_url, json={'query': query}, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            # 提取產品列表
+            variants = data['data']['product']['variants']
+            return variants
+        else:
+            st.error(f"API 連線失敗，代碼：{response.status_code}")
             return []
-            
-        soup = BeautifulSoup(response.text, 'html.parser')
-        products = []
-        
-        # 尋找產品容器
-        items = soup.select('li.product-item')
-        
-        for item in items:
-            try:
-                # 抓取圖片
-                img_tag = item.select_one('img.product-image-photo')
-                img_url = img_tag.get('data-src') or img_tag.get('src')
-                
-                # 抓取連結
-                link_tag = item.select_one('a.product-item-link')
-                link = link_tag['href'] if link_tag else url
-                
-                # 抓取價格
-                price_tag = item.select_one('.price')
-                price = price_tag.get_text().strip() if price_tag else "See Price"
-                
-                if img_url and "placeholder" not in img_url:
-                    products.append({"img": img_url, "price": price, "link": link})
-            except:
-                continue
-        return products
     except Exception as e:
-        st.error(f"連線發生異常: {e}")
+        st.error(f"發生錯誤: {e}")
         return []
 
-if st.button('🚀 點擊刷新最新庫存'):
-    with st.spinner('正在突破官網防火牆並搬運數據...'):
-        data = fetch_data()
-        if data:
-            st.success(f"成功！目前有 {len(data)} 款 F306 現貨")
-            for p in data:
+if st.button('🚀 重新掃描最新 F306 庫存'):
+    with st.spinner('正在與瑞士服務器通訊...'):
+        stock = fetch_f306_stock()
+        
+        if stock:
+            st.success(f"掃描完成！目前共有 {len(stock)} 款 F306 HAZZARD")
+            
+            for item in stock:
+                # 取得圖片連結 (通常取第一張)
+                img_url = item['images'][0]['url'] if item['images'] else ""
+                price = item['price']['formatted']
+                buy_url = "https://www.freitag.ch" + item['url']
+                
                 with st.container():
                     st.markdown(f"""
-                    <div class="product-box">
-                        <img src="{p['img']}">
-                        <div class="price-text">{p['price']}</div>
+                    <div class="product-card">
+                        <img src="{img_url}">
+                        <div class="price-tag">{price}</div>
                     </div>
                     """, unsafe_allow_html=True)
-                    st.link_button("👉 前往官網下單", p['link'])
+                    st.link_button("👉 直接進入購買頁面", buy_url)
                     st.markdown("<br>", unsafe_allow_html=True)
         else:
-            st.warning("還是沒抓到資料。官網可能開啟了更高級的防護。請稍等幾分鐘後再次嘗試。")
+            st.warning("暫時沒有找到庫存，請稍後再試。")
