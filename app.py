@@ -76,3 +76,26 @@ def fetch_data():
                 
         return products
     except Exception as e:
+        st.error(f"連線異常: {e}")
+        return []
+
+if st.button('🚀 重新掃描 F306 庫存'):
+    with st.spinner('正在從官網搬運數據...'):
+        data = fetch_data()
+        if data:
+            # 由於可能抓到重複項，我們做個簡單的去重
+            unique_data = {p['img']: p for p in data}.values()
+            st.success(f"找到了 {len(unique_data)} 款現貨！")
+            
+            for p in unique_data:
+                with st.container():
+                    st.markdown(f"""
+                    <div class="product-box">
+                        <img src="{p['img']}">
+                        <div class="price-text">{p['price']}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.link_button("👉 直接查看", p['link'])
+                    st.markdown("<br>", unsafe_allow_html=True)
+        else:
+            st.warning("暫時沒抓到資料。可能是官網目前沒有 F306 現貨，或是防爬蟲等級太高。")
