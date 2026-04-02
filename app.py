@@ -1,72 +1,80 @@
 import streamlit as st
-import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 
 st.set_page_config(page_title="F306 Hazzard 助手", layout="centered")
 
+# 美化 UI
 st.markdown("""
     <style>
-    .product-box { border: 1px solid #eee; border-radius: 10px; padding: 10px; margin-bottom: 15px; text-align: center; background: white; }
-    .price-text { color: #d32f2f; font-weight: bold; font-size: 1.2rem; margin: 10px 0; }
-    img { border-radius: 8px; max-width: 100%; height: auto; }
+    .product-box { border: 1px solid #eee; border-radius: 12px; padding: 15px; margin-bottom: 20px; text-align: center; background: white; color: black; }
+    .price-text { color: #d32f2f; font-weight: bold; font-size: 1.3rem; margin: 10px 0; }
+    img { border-radius: 8px; width: 100%; height: auto; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🎒 F306 HAZZARD 實時清單")
 
 def fetch_data():
-    # 使用 F306 的具體分類網址
     url = "https://www.freitag.ch/en/f306"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1",
-        "Accept-Language": "en-US,en;q=0.9"
-    }
+    # 使用 cloudscraper 繞過 Cloudflare 等防爬工具
+    scraper = cloudscraper.create_scraper(
+        browser={
+            'browser': 'chrome',
+            'platform': 'windows',
+            'mobile': False
+        }
+    )
     
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        response = scraper.get(url, timeout=20)
+        if response.status_code != 200:
+            st.error(f"網站回傳錯誤碼: {response.status_code}")
+            return []
+            
         soup = BeautifulSoup(response.text, 'html.parser')
         products = []
         
-        # 修正後的定位邏輯：Freitag 現在常用 li.item.product-item 
-        items = soup.find_all('li', class_='product-item')
+        # 尋找產品容器
+        items = soup.select('li.product-item')
         
         for item in items:
             try:
-                # 抓取圖片 (嘗試多個屬性以防 lazy loading)
-                img_tag = item.find('img')
+                # 抓取圖片
+                img_tag = item.select_one('img.product-image-photo')
                 img_url = img_tag.get('data-src') or img_tag.get('src')
                 
                 # 抓取連結
-                link_tag = item.find('a', class_='product-item-link')
-                link = link_tag['href'] if link_tag else "https://www.freitag.ch/en/f306"
+                link_tag = item.select_one('a.product-item-link')
+                link = link_tag['href'] if link_tag else url
                 
                 # 抓取價格
-                price_tag = item.find('span', class_='price')
-                price = price_tag.get_text().strip() if price_tag else "Check Website"
+                price_tag = item.select_one('.price')
+                price = price_tag.get_text().strip() if price_tag else "See Price"
                 
                 if img_url and "placeholder" not in img_url:
                     products.append({"img": img_url, "price": price, "link": link})
-            except Exception:
+            except:
                 continue
         return products
     except Exception as e:
-        st.error(f"連線出錯: {e}")
+        st.error(f"連線發生異常: {e}")
         return []
 
-if st.button('🔄 點擊刷新最新庫存'):
-    with st.spinner('正在從瑞士搬運數據...'):
+if st.button('🚀 點擊刷新最新庫存'):
+    with st.spinner('正在突破官網防火牆並搬運數據...'):
         data = fetch_data()
         if data:
-            st.success(f"找到 {len(data)} 款 F306！")
+            st.success(f"成功！目前有 {len(data)} 款 F306 現貨")
             for p in data:
                 with st.container():
                     st.markdown(f"""
                     <div class="product-box">
                         <img src="{p['img']}">
-                        <p class="price-text">{p['price']}</p>
+                        <div class="price-text">{p['price']}</div>
                     </div>
                     """, unsafe_allow_html=True)
-                    st.link_button("👉 前往購買", p['link'])
+                    st.link_button("👉 前往官網下單", p['link'])
                     st.markdown("<br>", unsafe_allow_html=True)
         else:
-            st.warning("暫時沒抓到資料。原因可能是：1. 該型號剛好賣完 2. 官網正在反爬蟲。請稍後再試。")
+            st.warning("還是沒抓到資料。官網可能開啟了更高級的防護。請稍等幾分鐘後再次嘗試。")
