@@ -2,14 +2,13 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 
-# 設定頁面
+# 基本頁面設定
 st.set_page_config(page_title="F306 掃描器", layout="centered")
 
 st.title("🎒 F306 HAZZARD 掃描器")
-st.write("連線狀態檢查...")
+st.caption("連線狀態：準備就緒")
 
 def fetch_data():
-    # 嘗試最直接的網址
     url = "https://www.freitag.ch/en/f306"
     headers = {
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1"
@@ -18,16 +17,19 @@ def fetch_data():
     try:
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code != 200:
-            return f"網站回傳錯誤代碼: {response.status_code}"
+            return f"網站連線失敗，代碼: {response.status_code}"
         
         soup = BeautifulSoup(response.text, 'html.parser')
         products = []
         
-        # 使用最寬鬆的抓取條件
+        # 尋找產品項目
         items = soup.select('.product-item')
         for item in items:
-            img_tag = item.find('img')
-            if img_tag:
+            try:
+                img_tag = item.find('img')
+                if not img_tag:
+                    continue
+                    
                 img = img_tag.get('data-src') or img_tag.get('src')
                 if img and img.startswith('/'):
                     img = "https://www.freitag.ch" + img
@@ -40,24 +42,26 @@ def fetch_data():
                 
                 if img and "placeholder" not in img:
                     products.append({"img": img, "price": price, "link": link})
+            except:
+                continue # 忽略個別項目的解析錯誤
         
         return products
     except Exception as e:
-        return f"發生意外錯誤: {str(e)}"
+        return f"連線錯誤: {str(e)}"
 
-# 按鈕觸發
-if st.button('🚀 開始掃描最新現貨'):
-    result = fetch_data()
-    
-    if isinstance(result, str):
-        st.error(result)
-    elif len(result) == 0:
-        st.warning("成功連線官網，但目前頁面上沒有顯示任何 F306 產品。")
-    else:
-        st.success(f"找到 {len(result)} 款現貨！")
-        for p in result:
-            with st.container():
+# 顯示介面
+if st.button('🚀 執行掃描'):
+    with st.spinner('掃描中...'):
+        result = fetch_data()
+        
+        if isinstance(result, str):
+            st.error(result)
+        elif not result:
+            st.warning("目前官網沒有顯示 F306 產品，或防爬蟲阻擋。")
+        else:
+            st.success(f"發現 {len(result)} 款產品！")
+            for p in result:
                 st.image(p['img'], use_container_width=True)
                 st.write(f"**價格: {p['price']}**")
                 st.link_button("👉 前往官網", p['link'])
-                st.write("---")
+                st.markdown("---")
