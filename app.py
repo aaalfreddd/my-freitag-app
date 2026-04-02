@@ -1,59 +1,63 @@
 import streamlit as st
 import requests
+from bs4 import BeautifulSoup
 
-st.set_page_config(page_title="F306 Hazzard 助手", layout="centered")
-
-st.markdown("""
-    <style>
-    .product-box { border: 1px solid #eee; border-radius: 12px; padding: 15px; margin-bottom: 20px; text-align: center; background: white; color: black; }
-    .price-text { color: #d32f2f; font-weight: bold; font-size: 1.3rem; margin: 10px 0; }
-    img { border-radius: 8px; width: 100%; height: auto; }
-    </style>
-    """, unsafe_allow_html=True)
+# 設定頁面
+st.set_page_config(page_title="F306 掃描器", layout="centered")
 
 st.title("🎒 F306 HAZZARD 掃描器")
-st.caption("直接抓取 Freitag 官方產品目錄數據")
+st.write("連線狀態檢查...")
 
 def fetch_data():
-    # 這是 Freitag 官方最直接的產品列表數據接口 (F306 型號代碼 2211)
-    # 我們改用更通用的請求方式
-    url = "https://www.freitag.ch/en/f306/load-more"
-    
+    # 嘗試最直接的網址
+    url = "https://www.freitag.ch/en/f306"
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
-        "X-Requested-With": "XMLHttpRequest",
-        "Accept": "application/json, text/javascript, */*; q=0.01"
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1"
     }
-
+    
     try:
-        # 直接請求 load-more 介面，這通常會回傳當前所有庫存的 HTML 或是 JSON
         response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code != 200:
+            return f"網站回傳錯誤代碼: {response.status_code}"
         
-        if response.status_code == 200:
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(response.text, 'html.parser')
-            products = []
-            
-            # 定位所有產品項目
-            items = soup.select('.product-item')
-            for item in items:
-                try:
-                    img_tag = item.select_one('img')
-                    # 抓取圖片，優先找延遲載入的真實位址
-                    img = img_tag.get('data-src') or img_tag.get('src')
-                    if img and img.startswith('/'):
-                        img = "https://www.freitag.ch" + img
-                        
-                    price = item.select_one('.price').get_text().strip()
-                    link = "https://www.freitag.ch" + item.select_one('a')['href']
-                    
-                    if "placeholder" not in img:
-                        products.append({"img": img, "price": price, "link": link})
-                except:
-                    continue
-            return products
-        else:
-            st.error(f"官網回應異常 (代碼: {response.status_code})")
-            return []
+        soup = BeautifulSoup(response.text, 'html.parser')
+        products = []
+        
+        # 使用最寬鬆的抓取條件
+        items = soup.select('.product-item')
+        for item in items:
+            img_tag = item.find('img')
+            if img_tag:
+                img = img_tag.get('data-src') or img_tag.get('src')
+                if img and img.startswith('/'):
+                    img = "https://www.freitag.ch" + img
+                
+                link_tag = item.find('a', href=True)
+                link = "https://www.freitag.ch" + link_tag['href'] if link_tag else url
+                
+                price_tag = item.select_one('.price')
+                price = price_tag.get_text().strip() if price_tag else "查看售價"
+                
+                if img and "placeholder" not in img:
+                    products.append({"img": img, "price": price, "link": link})
+        
+        return products
     except Exception as e:
-        st.error(f"連線失敗: {e}")
+        return f"發生意外錯誤: {str(e)}"
+
+# 按鈕觸發
+if st.button('🚀 開始掃描最新現貨'):
+    result = fetch_data()
+    
+    if isinstance(result, str):
+        st.error(result)
+    elif len(result) == 0:
+        st.warning("成功連線官網，但目前頁面上沒有顯示任何 F306 產品。")
+    else:
+        st.success(f"找到 {len(result)} 款現貨！")
+        for p in result:
+            with st.container():
+                st.image(p['img'], use_container_width=True)
+                st.write(f"**價格: {p['price']}**")
+                st.link_button("👉 前往官網", p['link'])
+                st.write("---")
